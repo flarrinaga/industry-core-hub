@@ -71,10 +71,13 @@ class AssetSyncJob:
             # Step 3: Sync Digital Twin Event asset
             self._sync_digital_twin_event_asset()
 
-            # Step 4: Sync Unique ID Push asset
+            # Step 4: Sync Traceability Event asset
+            self._sync_traceability_event_asset()
+
+            # Step 5: Sync Unique ID Push asset
             self._sync_unique_id_push_asset()
 
-            # Step 5: Sync PCF Exchange asset if enabled
+            # Step 6: Sync PCF Exchange asset if enabled
             if self._pcf_kit_enablement_check():
                 self._sync_pcf_exchange_asset()
             
@@ -179,6 +182,39 @@ class AssetSyncJob:
 
         except Exception as e:
             logger.error(f"[AssetSyncJob] Error synchronizing Unique ID Push asset: {e}", exc_info=True)
+
+    def _sync_traceability_event_asset(self) -> None:
+        """
+        Synchronize the Traceability Event API asset with the connector.
+        """
+        try:
+            logger.info("[AssetSyncJob] Synchronizing Traceability Event asset...")
+
+            traceability_config = ConfigManager.get_config("provider.traceabilityEventAPI")
+            if not traceability_config:
+                logger.warning("[AssetSyncJob] No Traceability Event configuration found. Skipping sync.")
+                return
+
+            asset_config = traceability_config.get("asset_config", {})
+
+            traceability_asset_id, _, _, _ = self.connector_provider_manager.register_traceability_event_offer(
+                hostname=traceability_config.get("hostname"),
+                api_path=traceability_config.get("apiPath", "/v1/traceability-event"),
+                traceability_event_policy_config=traceability_config.get("policy"),
+                existing_asset_id=asset_config.get("existing_asset_id", None),
+                dct_type=asset_config.get(
+                    "dct_type",
+                    "https://w3id.org/catenax/taxonomy#TraceabilityEventAPI",
+                ),
+            )
+
+            if traceability_asset_id:
+                logger.info(f"[AssetSyncJob] Traceability Event asset synchronized: {traceability_asset_id}")
+            else:
+                logger.error("[AssetSyncJob] Failed to synchronize Traceability Event asset.")
+
+        except Exception as e:
+            logger.error(f"[AssetSyncJob] Error synchronizing Traceability Event asset: {e}", exc_info=True)
     
     def _sync_semantic_assets(self) -> None:
         """

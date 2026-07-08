@@ -54,6 +54,7 @@ from .routers.consumer.v1 import (
 )
 from .routers.notifications.v1 import (
     digital_twin_event_api,
+    traceability_event_api,
     notifications_management,
     unique_id_push_api
 )
@@ -91,6 +92,10 @@ tags_metadata = [
     {
         "name": "Digital Twin Event Management",
         "description": "Endpoints for receiving notifications about events related to digital twins, such as updates or changes in the twin data"
+    },
+    {
+        "name": "Traceability Event Management",
+        "description": "Endpoints for receiving traceability-related notifications, including quality investigation feedback"
     },
     {
         "name": "Notifications Management",
@@ -186,6 +191,7 @@ v1_router.include_router(sharing_handler.router)
 v1_router.include_router(connection_management.router)
 v1_router.include_router(discovery_management.router)
 v1_router.include_router(digital_twin_event_api.router)
+v1_router.include_router(traceability_event_api.router)
 v1_router.include_router(notifications_management.router)
 v1_router.include_router(unique_id_push_api.router)
 v1_router.include_router(addons.router)
@@ -221,6 +227,7 @@ def custom_openapi():
                 "Open Connection Management",
                 "Part Discovery Management",
                 "Digital Twin Event Management",
+                "Traceability Event Management",
                 "Notifications Management",
                 "Unique ID Push Notifications"
             ],

@@ -727,6 +727,63 @@ backend:
                   rightOperand: "active"
             prohibition: []
             obligation: []
+      traceabilityEventAPI:
+        # -- Hostname of the local backend exposing /v1/traceability-event
+        hostname: "https://<backend-hostname>"
+        apiPath: /v1/traceability-event
+        asset_config:
+          dct_type: "https://w3id.org/catenax/taxonomy#TraceabilityEventAPI"
+          # existing_asset_id: <traceability-event-asset>
+        policy:
+          usage:
+            context:
+              - "https://w3id.org/catenax/2025/9/policy/odrl.jsonld"
+              - "https://w3id.org/catenax/2025/9/policy/context.jsonld"
+              - "@vocab": "https://w3id.org/edc/v0.0.1/ns/"
+            permission:
+              - action: "use"
+                constraint:
+                  and:
+                    - leftOperand: "https://w3id.org/catenax/2025/9/policy/FrameworkAgreement"
+                      operator: "eq"
+                      rightOperand: "DataExchangeGovernance:1.0"
+                    - leftOperand: "https://w3id.org/catenax/2025/9/policy/Membership"
+                      operator: "eq"
+                      rightOperand: "active"
+                    - leftOperand: "https://w3id.org/catenax/2025/9/policy/UsagePurpose"
+                      operator: "isAnyOf"
+                      rightOperand: "cx.core.industrycore:1"
+            prohibition: []
+            obligation: []
+          consumption:
+            permission:
+              - action: "use"
+                constraint:
+                  and:
+                    - leftOperand: "FrameworkAgreement"
+                      operator: "eq"
+                      rightOperand: "DataExchangeGovernance:1.0"
+                    - leftOperand: "Membership"
+                      operator: "eq"
+                      rightOperand: "active"
+                    - leftOperand: "UsagePurpose"
+                      operator: "isAnyOf"
+                      rightOperand: "cx.core.industrycore:1"
+            prohibition: []
+            obligation: []
+          access:
+            context:
+              - "https://w3id.org/catenax/2025/9/policy/odrl.jsonld"
+              - "https://w3id.org/catenax/2025/9/policy/context.jsonld"
+              - "@vocab": "https://w3id.org/edc/v0.0.1/ns/"
+            permission:
+              - action: "access"
+                constraint:
+                  leftOperand: "https://w3id.org/catenax/2025/9/policy/Membership"
+                  operator: "eq"
+                  rightOperand: "active"
+            prohibition: []
+            obligation: []
       # -- Unique ID Push notification endpoint configuration (CX-0126)
       # -- Unique ID Push notification endpoint configuration (CX-0126)
       # -- hostname points to the ichub-backend itself, which serves this endpoint

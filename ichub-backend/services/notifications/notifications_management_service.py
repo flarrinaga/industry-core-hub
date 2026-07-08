@@ -47,6 +47,8 @@ from dtr import dtr_manager
 logger = LoggingManager.get_logger(__name__)
 
 _USE_CONFIG_POLICIES = object()
+_TRACEABILITY_CONTEXT_PREFIX = "IndustryCore-Traceability-"
+_TRACEABILITY_EVENT_DCT_TYPE = "https://w3id.org/catenax/taxonomy#TraceabilityEventAPI"
 
 class NotificationsManagementService():
     """
@@ -88,6 +90,10 @@ class NotificationsManagementService():
         Build a stable location reference for the stored notification payload.
         """
         return f"{SEM_ID_NOTIFICATION}:{message_id}"
+
+    @staticmethod
+    def _is_traceability_notification_context(context: str) -> bool:
+        return context.startswith(_TRACEABILITY_CONTEXT_PREFIX)
 
     def _purge_edrs_for_notification(self, provider_bpn: str) -> None:
         """
@@ -249,21 +255,6 @@ class NotificationsManagementService():
                     f"DSP URL [{resolved_dsp_url}] for BPN [{provider_bpn}]"
                 )
 
-            # Resolve policies: explicit None means accept any policy from provider;
-            # sentinel (default) means use config fallback; explicit list is used as-is.
-            if list_policies is _USE_CONFIG_POLICIES:
-                dte_policy = ConfigManager.get_config("provider.digitalTwinEventAPI.policy.consumption")
-                if dte_policy:
-                    resolved_policies = [dte_policy]
-                    logger.debug("[Notifications] Using provider.digitalTwinEventAPI.policy.consumption from configuration")
-                else:
-                    resolved_policies = []
-                    logger.warning("[Notifications] No consumption policy configured; will reject all offers")
-            elif list_policies is None:
-                resolved_policies = None
-            else:
-                resolved_policies = list_policies
-
             with RepositoryManagerFactory().create() as repos:
                 db_notification = repos.notification_repository.find_by_message_id(
                     message_id=message_id
@@ -277,7 +268,35 @@ class NotificationsManagementService():
             )
             notification = db_notification.to_sdk(payload)
 
-            resolved_dct_type = dct_type or DIGITAL_TWIN_EVENT_API_TYPE
+            notification_context = notification.header.context
+            is_traceability_context = self._is_traceability_notification_context(notification_context)
+
+            # Resolve policies: explicit None means accept any policy from provider;
+            # sentinel (default) means use config fallback; explicit list is used as-is.
+            if list_policies is _USE_CONFIG_POLICIES:
+                policy_config_key = "provider.traceabilityEventAPI.policy.consumption" if is_traceability_context else "provider.digitalTwinEventAPI.policy.consumption"
+                context_label = "traceabilityEventAPI" if is_traceability_context else "digitalTwinEventAPI"
+                configured_policy = ConfigManager.get_config(policy_config_key)
+                if configured_policy:
+                    resolved_policies = [configured_policy]
+                    logger.debug(f"[Notifications] Using provider.{context_label}.policy.consumption from configuration")
+                else:
+                    resolved_policies = []
+                    logger.warning(f"[Notifications] No consumption policy configured for provider.{context_label}; will reject all offers")
+            elif list_policies is None:
+                resolved_policies = None
+            else:
+                resolved_policies = list_policies
+
+            resolved_dct_type = dct_type
+            if not resolved_dct_type and is_traceability_context:
+                resolved_dct_type = ConfigManager.get_config(
+                    "provider.traceabilityEventAPI.asset_config.dct_type",
+                    default=_TRACEABILITY_EVENT_DCT_TYPE,
+                )
+            if not resolved_dct_type:
+                resolved_dct_type = DIGITAL_TWIN_EVENT_API_TYPE
+
             self._purge_edrs_for_notification(provider_bpn)
 
             # Stamp the actual dispatch time so sentDateTime in the payload reflects
@@ -292,7 +311,7 @@ class NotificationsManagementService():
             )
 
             # Resolve endpoint path: explicit override or derived from context
-            resolved_endpoint = endpoint_url or self._derive_endpoint_path(notification.header.context)
+            resolved_endpoint = endpoint_url or self._derive_endpoint_path(notification_context)
 
             notification_service = NotificationConsumerService(
                 self.connector_consumer_service,

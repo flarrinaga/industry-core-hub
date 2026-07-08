@@ -533,6 +533,114 @@ class ConnectorProviderManager:
 
         return asset_id, usage_policy_id, access_policy_id, contract_id
 
+    def register_traceability_event_offer(
+        self,
+        hostname: str,
+        api_path: str = "/v1/traceability-event",
+        traceability_event_policy_config: dict = None,
+        existing_asset_id: str = None,
+        dct_type: str = "https://w3id.org/catenax/taxonomy#TraceabilityEventAPI",
+        version: str = "3.0",
+        headers: dict = None,
+    ) -> tuple[str, str, str, str]:
+        """
+        Register a Traceability Event API notification asset, create policies and contract for it.
+
+        Returns a tuple: (asset_id, usage_policy_id, access_policy_id, contract_id)
+        """
+        traceability_event_url = urljoin(
+            hostname.rstrip("/") + "/", api_path.lstrip("/")
+        )
+
+        if self.authorization:
+            headers = {
+                self.backend_api_key: self.backend_api_key_value
+            }
+
+        # Step 1: Create or get the Traceability Event asset
+        asset_id = self.get_or_create_traceability_event_asset(
+            traceability_event_url=traceability_event_url,
+            existing_asset_id=existing_asset_id,
+            dct_type=dct_type,
+            version=version,
+            headers=headers,
+        )
+
+        # Step 2: Create or get policies and contract
+        policy_config = traceability_event_policy_config or self.empty_policy
+        usage_policy_id, access_policy_id, contract_id = self.get_or_create_contract_with_policies(
+            asset_id=asset_id,
+            policy_config=policy_config,
+        )
+
+        return asset_id, usage_policy_id, access_policy_id, contract_id
+
+    def get_or_create_traceability_event_asset(
+        self,
+        traceability_event_url: str,
+        existing_asset_id: str = None,
+        dct_type: str = "https://w3id.org/catenax/taxonomy#TraceabilityEventAPI",
+        version: str = "3.0",
+        headers: dict = None,
+    ) -> str:
+        """Get or create the Traceability Event notification asset in the connector."""
+        if not existing_asset_id:
+            existing_asset_id = self.generate_traceability_event_asset_id(traceability_event_url)
+
+        existing_asset = self.connector_service.assets.get_by_id(oid=existing_asset_id)
+        if existing_asset.status_code == 200:
+            logger.debug(f"[TraceabilityEvent] Asset with ID {existing_asset_id} already exists.")
+            return existing_asset_id
+
+        logger.info(f"[TraceabilityEvent] Creating new asset with ID {existing_asset_id}.")
+        try:
+            asset = self.create_traceability_event_asset(
+                asset_id=existing_asset_id,
+                notification_endpoint_url=traceability_event_url,
+                dct_type=dct_type,
+                version=version,
+                headers=headers,
+            )
+        except ValueError as e:
+            logger.error(
+                f"[TraceabilityEvent] Failed to register asset with ID {existing_asset_id} "
+                f"for URL '{traceability_event_url}'. Error: {e}"
+            )
+            raise
+
+        logger.info(f"[TraceabilityEvent] Successfully registered asset with ID {existing_asset_id}.")
+        return asset.get("@id", existing_asset_id)
+
+    def generate_traceability_event_asset_id(self, traceability_event_url: str) -> str:
+        """Generate a unique asset ID for the Traceability Event API asset."""
+        return "ichub:asset:traceability-event:" + blake2b_128bit(traceability_event_url)
+
+    def create_traceability_event_asset(
+        self,
+        asset_id: str,
+        notification_endpoint_url: str,
+        dct_type: str = "https://w3id.org/catenax/taxonomy#TraceabilityEventAPI",
+        version: str = "3.0",
+        headers: dict = None,
+    ):
+        """
+        Create the Traceability Event API asset directly via the connector provider service.
+        """
+        proxy_params = {
+            "proxyQueryParams": "false",
+            "proxyPath": "true",
+            "proxyMethod": "true",
+            "proxyBody": "true",
+        }
+        return self.connector_service.create_asset(
+            asset_id=asset_id,
+            base_url=notification_endpoint_url,
+            dct_type=dct_type,
+            version=version,
+            proxy_params=proxy_params,
+            headers=headers,
+        )
+
     def get_or_create_unique_id_push_asset(
         self,
         unique_id_push_url: str,
