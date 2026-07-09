@@ -153,17 +153,17 @@ const TraceabilityQualityInvestigationFaultDetailPage: React.FC = () => {
               variant="outlined"
               sx={{
                 p: 2,
-                background: 'rgba(17, 17, 17, 0.92)',
+                background: '#fff',
                 borderColor: 'rgba(255,255,255,0.2)',
               }}
             >
-              <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.9)', mb: 1, fontFamily: 'monospace' }}>
+              <Typography variant="body2" sx={{ color: '#000', mb: 1, fontFamily: 'monospace' }}>
                 <strong>Request Message ID:</strong> {requestMessageId || 'n/a'}
               </Typography>
-              <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.9)', mb: 1, fontFamily: 'monospace' }}>
+              <Typography variant="body2" sx={{ color: '#000', mb: 1, fontFamily: 'monospace' }}>
                 <strong>Fault Message ID:</strong> {faultMessageId || 'n/a'}
               </Typography>
-              <Typography variant="body1" sx={{ color: '#fff', mt: 2 }}>
+              <Typography variant="body1" sx={{ color: '#000', mt: 2 }}>
                 {information}
               </Typography>
             </Paper>

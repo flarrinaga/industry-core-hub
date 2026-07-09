@@ -30,9 +30,14 @@ import {
   CardContent,
   CircularProgress,
   Container,
-  Grid2,
   InputAdornment,
   Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   TextField,
   Typography,
 } from '@mui/material';
@@ -46,6 +51,7 @@ import {
   getQualityInvestigationNotificationContentString,
   QI_CONTEXT_FAULT,
   QI_CONTEXT_REQUEST,
+  QualityInvestigationNotification,
 } from '../api';
 
 interface ReceivedRequestRow {
@@ -57,10 +63,28 @@ interface ReceivedRequestRow {
   manufacturerPartId: string;
   requesterBpn: string;
   requesterPartGlobalId: string;
-  hasPendingResponse: boolean;
+  status: 'OPEN' | 'OK';
+  requestOpenedAt: string;
+  requestClosedAt?: string;
+  faultMessageId?: string;
 }
 
 const localBpn = getParticipantId();
+
+const formatDateTime = (value?: string): string => {
+  if (!value) {
+    return 'n/a';
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+};
+
+const getStatusStyles = (status: 'OPEN' | 'OK'): { background: string; color: string } => {
+  return status === 'OPEN'
+    ? { background: 'linear-gradient(135deg, #ff9f1c 0%, #ff7a00 100%)', color: '#fff' }
+    : { background: 'linear-gradient(135deg, #41c77b 0%, #2f8f49 100%)', color: '#fff' };
+};
 
 const TraceabilityQualityInvestigationReceiverInboxPage: React.FC = () => {
   const navigate = useNavigate();
@@ -100,42 +124,49 @@ const TraceabilityQualityInvestigationReceiverInboxPage: React.FC = () => {
 
         const twinMap = new Map<string, SerializedPartTwinDetailsRead | null>(twinEntries);
 
-        const mappedRows = incomingRequests
-          .map((notification) => {
-            const localPartGlobalId = getQualityInvestigationNotificationContentString(notification, 'remotePartGlobalId');
-            const requesterPartGlobalId = getQualityInvestigationNotificationContentString(notification, 'localPartGlobalId');
-            const fallbackPartInstanceId = getQualityInvestigationNotificationContentString(notification, 'localPartInstanceId');
-            const twin = twinMap.get(localPartGlobalId) ?? null;
-            const hasPendingResponse = !notifications.some((candidate) => {
-              return candidate.context === QI_CONTEXT_FAULT
-                && candidate.senderBpn === localBpn
-                && candidate.relatedMessageId === notification.messageId;
-            });
-
-            return {
-              id: notification.messageId,
-              requestMessageId: notification.messageId,
-              localPartGlobalId,
-              localPartInstanceId: twin?.partInstanceId ?? fallbackPartInstanceId ?? 'n/a',
-              manufacturerId: twin?.manufacturerId ?? 'n/a',
-              manufacturerPartId: twin?.manufacturerPartId ?? 'n/a',
-              requesterBpn: notification.senderBpn,
-              requesterPartGlobalId,
-              hasPendingResponse,
-            } as ReceivedRequestRow;
-          })
-          .sort((left, right) => {
-            if (left.hasPendingResponse !== right.hasPendingResponse) {
-              return left.hasPendingResponse ? -1 : 1;
-            }
-
-            const byPart = left.manufacturerPartId.localeCompare(right.manufacturerPartId);
-            if (byPart !== 0) {
-              return byPart;
-            }
-
-            return left.localPartInstanceId.localeCompare(right.localPartInstanceId);
+        const mappedRows = incomingRequests.map((notification) => {
+          const localPartGlobalId = getQualityInvestigationNotificationContentString(notification, 'remotePartGlobalId');
+          const requesterPartGlobalId = getQualityInvestigationNotificationContentString(notification, 'localPartGlobalId');
+          const fallbackPartInstanceId = getQualityInvestigationNotificationContentString(notification, 'localPartInstanceId');
+          const twin = twinMap.get(localPartGlobalId) ?? null;
+          const faultNotification = notifications.find((candidate) => {
+            return candidate.context === QI_CONTEXT_FAULT
+              && candidate.senderBpn === localBpn
+              && candidate.relatedMessageId === notification.messageId;
           });
+
+          return {
+            id: notification.messageId,
+            requestMessageId: notification.messageId,
+            localPartGlobalId,
+            localPartInstanceId: twin?.partInstanceId ?? fallbackPartInstanceId ?? 'n/a',
+            manufacturerId: twin?.manufacturerId ?? 'n/a',
+            manufacturerPartId: twin?.manufacturerPartId ?? 'n/a',
+            requesterBpn: notification.senderBpn,
+            requesterPartGlobalId,
+            status: faultNotification ? 'OK' : 'OPEN',
+            requestOpenedAt: notification.createdAt,
+            requestClosedAt: faultNotification?.createdAt,
+            faultMessageId: faultNotification?.messageId,
+          } as ReceivedRequestRow;
+        }).sort((left, right) => {
+          const byStatus = left.status === right.status ? 0 : (left.status === 'OPEN' ? -1 : 1);
+          if (byStatus !== 0) {
+            return byStatus;
+          }
+
+          const byDate = new Date(right.requestOpenedAt).getTime() - new Date(left.requestOpenedAt).getTime();
+          if (byDate !== 0) {
+            return byDate;
+          }
+
+          const byPart = left.manufacturerPartId.localeCompare(right.manufacturerPartId);
+          if (byPart !== 0) {
+            return byPart;
+          }
+
+          return left.localPartInstanceId.localeCompare(right.localPartInstanceId);
+        });
 
         setRows(mappedRows);
       } catch (loadError) {
@@ -162,6 +193,8 @@ const TraceabilityQualityInvestigationReceiverInboxPage: React.FC = () => {
       || row.localPartGlobalId.toLowerCase().includes(query)
       || row.requesterBpn.toLowerCase().includes(query)
       || row.requestMessageId.toLowerCase().includes(query)
+      || row.requestOpenedAt.toLowerCase().includes(query)
+      || (row.requestClosedAt ?? '').toLowerCase().includes(query)
     );
   }, [rows, searchQuery]);
 
@@ -197,7 +230,7 @@ const TraceabilityQualityInvestigationReceiverInboxPage: React.FC = () => {
             VIEW Received QI Requests
           </Typography>
           <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.72)' }}>
-            Local Part Instances that received a Traceability Quality Investigation request notification.
+            Traceability Quality Investigation requests received by the local partner.
           </Typography>
         </CardContent>
       </Card>
@@ -215,7 +248,7 @@ const TraceabilityQualityInvestigationReceiverInboxPage: React.FC = () => {
           fullWidth
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="Search by requester BPN, part instance ID, local global asset ID or request message ID"
+          placeholder="Search by manufacturer ID, part instance, requester BPN, dates or message IDs"
           sx={{
             ...darkCardStyles.textField,
             mb: 3,
@@ -258,81 +291,76 @@ const TraceabilityQualityInvestigationReceiverInboxPage: React.FC = () => {
         )}
 
         {!loading && !error && filteredRows.length > 0 && (
-          <Grid2 container spacing={2}>
-            {filteredRows.map((row) => (
-              <Grid2 key={row.id} size={{ xs: 12, md: 6, xl: 4 }}>
-                <Card
-                  sx={{
-                    ...darkCardStyles.card,
-                    height: '100%',
-                    border: '1px solid rgba(255, 122, 0, 0.22)',
-                  }}
-                >
-                  <CardContent sx={{ ...darkCardStyles.cardContent }}>
-                    <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
-                      {`${row.manufacturerPartId} / ${row.localPartInstanceId}`}
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)', mb: 2 }}>
-                      Traceability QI request received from remote partner.
-                    </Typography>
+          <TableContainer sx={{ mt: 1 }}>
+            <Table size="small" sx={{ minWidth: 1100 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Manufacturer Part ID / Part Instance ID</TableCell>
+                  <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Manufacturer ID</TableCell>
+                  <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Requester BPN</TableCell>
+                  <TableCell sx={{ color: '#fff', fontWeight: 700 }}>QI opened</TableCell>
+                  <TableCell sx={{ color: '#fff', fontWeight: 700 }}>QI closed</TableCell>
+                  <TableCell sx={{ color: '#fff', fontWeight: 700 }}>Status</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {filteredRows.map((row) => {
+                  const statusStyles = getStatusStyles(row.status);
 
-                    <Box sx={{ display: 'grid', gap: 1.25 }}>
-                      <Typography variant="body2" sx={{ color: '#fff' }}>
-                        <strong>Manufacturer ID:</strong> {row.manufacturerId}
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: '#fff' }}>
-                        <strong>Manufacturer Part ID:</strong> {row.manufacturerPartId}
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: '#fff' }}>
-                        <strong>Part Instance ID:</strong> {row.localPartInstanceId}
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: '#fff' }}>
-                        <strong>Requester BPN:</strong> {row.requesterBpn}
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: '#fff', fontFamily: 'monospace' }}>
-                        <strong>Local Global Asset ID:</strong> {row.localPartGlobalId}
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: '#fff', fontFamily: 'monospace' }}>
-                        <strong>Requester Global Asset ID:</strong> {row.requesterPartGlobalId || 'n/a'}
-                      </Typography>
-                    </Box>
-
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, mt: 3, flexWrap: 'wrap' }}>
-                      <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.65)', fontFamily: 'monospace', alignSelf: 'center' }}>
-                        {row.requestMessageId}
-                      </Typography>
-                      <Button
-                        variant="contained"
-                        onClick={() => {
-                          if (!row.hasPendingResponse) {
-                            return;
-                          }
-
-                          navigate(
-                            `/traceability/quality-investigation/respond?globalId=${encodeURIComponent(row.localPartGlobalId)}&requestMessageId=${encodeURIComponent(row.requestMessageId)}`
-                          );
-                        }}
-                        disabled={!row.hasPendingResponse}
-                        sx={{
-                          background: row.hasPendingResponse
-                            ? 'linear-gradient(135deg, #ff9f1c 0%, #ff7a00 100%)'
-                            : 'linear-gradient(135deg, #41c77b 0%, #2f8f49 100%)',
+                  return (
+                    <TableRow
+                      key={row.id}
+                      hover
+                      onClick={() => navigate(`/traceability/quality-investigation/respond?globalId=${encodeURIComponent(row.localPartGlobalId)}&requestMessageId=${encodeURIComponent(row.requestMessageId)}&faultMessageId=${encodeURIComponent(row.faultMessageId ?? '')}`)}
+                      sx={{
+                        cursor: 'pointer',
+                        '& td': {
                           color: '#fff',
-                          textTransform: 'none',
-                          '&.Mui-disabled': {
-                            color: '#fff',
-                            opacity: 0.85,
-                          },
-                        }}
-                      >
-                        {row.hasPendingResponse ? 'QI Requested' : 'OK'}
-                      </Button>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid2>
-            ))}
-          </Grid2>
+                        },
+                      }}
+                    >
+                      <TableCell>
+                        <Box sx={{ display: 'grid' }}>
+                          <Typography variant="body2" sx={{ color: '#fff', fontWeight: 600 }}>
+                            {row.manufacturerPartId}
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.72)' }}>
+                            {row.localPartInstanceId}
+                          </Typography>
+                        </Box>
+                      </TableCell>
+                      <TableCell>{row.manufacturerId}</TableCell>
+                      <TableCell>{row.requesterBpn}</TableCell>
+                      <TableCell>{formatDateTime(row.requestOpenedAt)}</TableCell>
+                      <TableCell>{formatDateTime(row.requestClosedAt)}</TableCell>
+                      <TableCell>
+                        <Button
+                          variant="contained"
+                          size="small"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            navigate(`/traceability/quality-investigation/respond?globalId=${encodeURIComponent(row.localPartGlobalId)}&requestMessageId=${encodeURIComponent(row.requestMessageId)}&faultMessageId=${encodeURIComponent(row.faultMessageId ?? '')}`);
+                          }}
+                          sx={{
+                            minWidth: 110,
+                            background: statusStyles.background,
+                            color: statusStyles.color,
+                            textTransform: 'none',
+                            '&:hover': {
+                              background: statusStyles.background,
+                              filter: 'brightness(1.05)',
+                            },
+                          }}
+                        >
+                          {row.status === 'OPEN' ? 'QI Requested' : 'OK'}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
         )}
       </Paper>
     </Container>

@@ -45,6 +45,7 @@ export interface QualityInvestigationNotification {
   messageId: string;
   senderBpn: string;
   receiverBpn: string;
+  createdAt: string;
   relatedMessageId?: string;
   context: string;
   direction: string;
@@ -171,6 +172,7 @@ export const fetchQualityInvestigationNotifications = async (
       messageId: getMessageIdFromHeader(notification),
       senderBpn: getSenderBpnFromHeader(notification),
       receiverBpn: getReceiverBpnFromHeader(notification),
+      createdAt: notification.createdAt,
       relatedMessageId: getRelatedMessageIdFromHeader(notification),
       context: notification.fullNotification.header.context,
       direction: notification.direction,
