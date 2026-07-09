@@ -28,6 +28,7 @@ import {
   Button,
   Card,
   CardContent,
+  Chip,
   CircularProgress,
   Container,
   Grid2,
@@ -39,8 +40,25 @@ import {
 import { ArrowBack, Launch as LaunchIcon, Search as SearchIcon } from '@mui/icons-material';
 import { fetchAllSerializedPartTwins, fetchSerializedPartTwinDetails } from '@/features/industry-core-kit/serialized-parts/api';
 import { SerializedPartTwinDetailsRead } from '@/features/industry-core-kit/serialized-parts/types/twin-types';
+import { getParticipantId } from '@/services/EnvironmentService';
 import { darkCardStyles } from '@/features/eco-pass-kit/passport-provision/styles/cardStyles';
-import { BOM_AS_BUILT_SEMANTIC_ID, BOM_AS_BUILT_SEMANTIC_ID_ALT, TwinAspectRead } from '../utils/bomAsBuilt';
+import {
+  fetchBomAsBuiltSubmodelContent,
+  fetchQualityInvestigationNotifications,
+  getFinishedQualityInvestigationRequestIds,
+  QI_CONTEXT_ACK,
+  QI_CONTEXT_FAULT,
+  QI_CONTEXT_REQUEST,
+  QualityInvestigationNotification,
+  QualityInvestigationStatus,
+} from '../api';
+import {
+  BOM_AS_BUILT_SEMANTIC_ID,
+  BOM_AS_BUILT_SEMANTIC_ID_ALT,
+  BomChildItem,
+  toChildItems,
+  TwinAspectRead,
+} from '../utils/bomAsBuilt';
 
 interface InvestigationRow {
   id: string;
@@ -51,7 +69,142 @@ interface InvestigationRow {
   globalId: string;
   dtrAasId: string;
   bomSubmodelCount: number;
+  relationStatuses: RelationStatus[];
 }
+
+interface RelationStatus {
+  id: string;
+  remoteBpn: string;
+  remotePartGlobalId: string;
+  status: QualityInvestigationStatus;
+  requestMessageId?: string;
+  faultMessageId?: string;
+}
+
+const localBpn = getParticipantId();
+
+const getChildString = (childItem: BomChildItem, key: string): string => {
+  const value = childItem[key];
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return String(value);
+  }
+
+  return '';
+};
+
+const getNotificationContentString = (notification: QualityInvestigationNotification, key: string): string => {
+  const value = notification.content[key];
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return String(value);
+  }
+
+  return '';
+};
+
+const getStatusChipConfig = (status: QualityInvestigationStatus): {
+  label: string;
+  backgroundColor: string;
+  color: string;
+} => {
+  switch (status) {
+    case 'OPEN':
+      return { label: 'QI Sent', backgroundColor: '#f7d358', color: '#1a1a1a' };
+    case 'ACK':
+      return { label: 'QI Ack', backgroundColor: '#f7d358', color: '#1a1a1a' };
+    case 'ACCEPTED':
+      return { label: 'QI Accepted', backgroundColor: '#8ed1fc', color: '#082032' };
+    case 'OK':
+    default:
+      return { label: 'OK', backgroundColor: '#6ccf7d', color: '#0f2716' };
+  }
+};
+
+const resolveChildInvestigationState = (
+  localPartGlobalId: string,
+  childItem: BomChildItem,
+  notifications: QualityInvestigationNotification[],
+  finishedRequestIds: Set<string>,
+): RelationStatus => {
+  const remoteBpn = getChildString(childItem, 'businessPartner');
+  const remotePartGlobalId = getChildString(childItem, 'globalAssetId');
+
+  if (!remoteBpn || !remotePartGlobalId || !localPartGlobalId) {
+    return {
+      id: `${remoteBpn || 'n/a'}::${remotePartGlobalId || 'n/a'}`,
+      remoteBpn,
+      remotePartGlobalId,
+      status: 'OK',
+    };
+  }
+
+  const request = notifications.find((notification) => {
+    return notification.context === QI_CONTEXT_REQUEST
+      && notification.senderBpn === localBpn
+      && notification.receiverBpn === remoteBpn
+      && getNotificationContentString(notification, 'localPartGlobalId') === localPartGlobalId
+      && getNotificationContentString(notification, 'remotePartGlobalId') === remotePartGlobalId;
+  });
+
+  if (!request || finishedRequestIds.has(request.messageId)) {
+    return {
+      id: `${remoteBpn}::${remotePartGlobalId}`,
+      remoteBpn,
+      remotePartGlobalId,
+      status: 'OK',
+    };
+  }
+
+  const fault = notifications.find((notification) => {
+    return notification.context === QI_CONTEXT_FAULT
+      && notification.senderBpn === remoteBpn
+      && notification.receiverBpn === localBpn
+      && notification.relatedMessageId === request.messageId;
+  });
+
+  if (fault) {
+    return {
+      id: `${remoteBpn}::${remotePartGlobalId}`,
+      remoteBpn,
+      remotePartGlobalId,
+      status: 'ACCEPTED',
+      requestMessageId: request.messageId,
+      faultMessageId: fault.messageId,
+    };
+  }
+
+  const ack = notifications.find((notification) => {
+    return notification.context === QI_CONTEXT_ACK
+      && notification.senderBpn === remoteBpn
+      && notification.receiverBpn === localBpn
+      && notification.relatedMessageId === request.messageId;
+  });
+
+  if (ack) {
+    return {
+      id: `${remoteBpn}::${remotePartGlobalId}`,
+      remoteBpn,
+      remotePartGlobalId,
+      status: 'ACK',
+      requestMessageId: request.messageId,
+    };
+  }
+
+  return {
+    id: `${remoteBpn}::${remotePartGlobalId}`,
+    remoteBpn,
+    remotePartGlobalId,
+    status: 'OPEN',
+    requestMessageId: request.messageId,
+  };
+};
 
 const TraceabilityQualityInvestigationSenderPage: React.FC = () => {
   const navigate = useNavigate();
@@ -81,6 +234,8 @@ const TraceabilityQualityInvestigationSenderPage: React.FC = () => {
 
       try {
         const localTwins = await fetchAllSerializedPartTwins();
+        const notifications = await fetchQualityInvestigationNotifications(localBpn);
+        const finishedRequestIds = new Set(getFinishedQualityInvestigationRequestIds());
         const detailedTwins = await Promise.all(
           localTwins
             .filter((twin) => Boolean(twin.globalId))
@@ -98,6 +253,58 @@ const TraceabilityQualityInvestigationSenderPage: React.FC = () => {
               return null;
             }
 
+            const localPartGlobalId = String(twinDetails.globalId);
+
+            return {
+              twinDetails,
+              bomAsBuiltAspects,
+              localPartGlobalId,
+            };
+          })
+          .filter((entry): entry is {
+            twinDetails: SerializedPartTwinDetailsRead;
+            bomAsBuiltAspects: TwinAspectRead[];
+            localPartGlobalId: string;
+          } => Boolean(entry));
+
+        const rowsWithRelations = await Promise.all(
+          uniqueRows.map(async ({ twinDetails, bomAsBuiltAspects, localPartGlobalId }) => {
+            const childItemsBySubmodel = await Promise.all(
+              bomAsBuiltAspects.map(async (aspect) => {
+                try {
+                  const content = await fetchBomAsBuiltSubmodelContent(aspect.submodelId);
+                  return toChildItems(content);
+                } catch (submodelError) {
+                  // A missing submodel endpoint response should not break the Open page.
+                  console.warn(
+                    `Skipping BoMAsBuilt submodel ${aspect.submodelId} while loading sender overview.`,
+                    submodelError,
+                  );
+                  return [];
+                }
+              })
+            );
+
+            const relationMap = new Map<string, RelationStatus>();
+            childItemsBySubmodel.flat().forEach((childItem) => {
+              const relation = resolveChildInvestigationState(localPartGlobalId, childItem, notifications, finishedRequestIds);
+              if (!relation.remoteBpn || !relation.remotePartGlobalId) {
+                return;
+              }
+
+              if (!relationMap.has(relation.id)) {
+                relationMap.set(relation.id, relation);
+              }
+            });
+
+            const relationStatuses = Array.from(relationMap.values()).sort((left, right) => {
+              const byBpn = left.remoteBpn.localeCompare(right.remoteBpn);
+              if (byBpn !== 0) {
+                return byBpn;
+              }
+              return left.remotePartGlobalId.localeCompare(right.remotePartGlobalId);
+            });
+
             return {
               id: String(twinDetails.globalId),
               name: `${twinDetails.manufacturerPartId} / ${twinDetails.partInstanceId}`,
@@ -107,11 +314,12 @@ const TraceabilityQualityInvestigationSenderPage: React.FC = () => {
               globalId: String(twinDetails.globalId),
               dtrAasId: String(twinDetails.dtrAasId),
               bomSubmodelCount: bomAsBuiltAspects.length,
+              relationStatuses,
             } as InvestigationRow;
           })
-          .filter((row): row is InvestigationRow => Boolean(row));
+        );
 
-        uniqueRows.sort((a, b) => {
+        rowsWithRelations.sort((a, b) => {
           const byPart = a.manufacturerPartId.localeCompare(b.manufacturerPartId);
           if (byPart !== 0) {
             return byPart;
@@ -119,7 +327,7 @@ const TraceabilityQualityInvestigationSenderPage: React.FC = () => {
           return a.partInstanceId.localeCompare(b.partInstanceId);
         });
 
-        setRows(uniqueRows);
+        setRows(rowsWithRelations);
       } catch (loadError) {
         const message = loadError instanceof Error ? loadError.message : 'Failed to load investigation data.';
         setError(message);
@@ -277,6 +485,57 @@ const TraceabilityQualityInvestigationSenderPage: React.FC = () => {
                       <Typography variant="body2" sx={{ color: '#fff', fontFamily: 'monospace' }}>
                         <strong>BoMAsBuilt Submodels:</strong> {row.bomSubmodelCount}
                       </Typography>
+                    </Box>
+
+                    <Box sx={{ mt: 2.5 }}>
+                      <Typography variant="subtitle2" sx={{ color: '#fff', mb: 1 }}>
+                        Part Instance Associations (BoMAsBuilt)
+                      </Typography>
+
+                      {row.relationStatuses.length === 0 && (
+                        <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.72)' }}>
+                          No valid childItem association found.
+                        </Typography>
+                      )}
+
+                      {row.relationStatuses.length > 0 && (
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                          {row.relationStatuses.map((relation) => {
+                            const statusChip = getStatusChipConfig(relation.status);
+                            const isAcceptedLink = relation.status === 'ACCEPTED' && relation.requestMessageId && relation.faultMessageId;
+
+                            return (
+                              <Chip
+                                key={`${row.id}-${relation.id}`}
+                                label={`${statusChip.label} - ${relation.remoteBpn}`}
+                                onClick={() => {
+                                  if (!isAcceptedLink) {
+                                    return;
+                                  }
+
+                                  navigate(
+                                    `/traceability/quality-investigation/fault-detail?globalId=${encodeURIComponent(row.globalId)}&requestMessageId=${encodeURIComponent(relation.requestMessageId!)}&faultMessageId=${encodeURIComponent(relation.faultMessageId!)}`
+                                  );
+                                }}
+                                clickable={Boolean(isAcceptedLink)}
+                                sx={{
+                                  fontWeight: 700,
+                                  backgroundColor: statusChip.backgroundColor,
+                                  color: statusChip.color,
+                                  cursor: isAcceptedLink ? 'pointer' : 'default',
+                                  maxWidth: '100%',
+                                  '& .MuiChip-label': {
+                                    display: 'block',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  },
+                                }}
+                              />
+                            );
+                          })}
+                        </Box>
+                      )}
                     </Box>
 
                     <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3 }}>
