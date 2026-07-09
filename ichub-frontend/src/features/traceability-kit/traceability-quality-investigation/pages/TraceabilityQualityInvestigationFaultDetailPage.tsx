@@ -106,7 +106,7 @@ const TraceabilityQualityInvestigationFaultDetailPage: React.FC = () => {
             },
           }}
         >
-          Back To Investigation Detail
+          Back To Open Investigation Detail
         </Button>
 
         <Button

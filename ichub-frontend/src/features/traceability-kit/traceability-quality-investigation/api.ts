@@ -82,6 +82,22 @@ interface CreateNotificationResponse {
   message_id: string;
 }
 
+export const getQualityInvestigationNotificationContentString = (
+  notification: QualityInvestigationNotification,
+  key: string,
+): string => {
+  const value = notification.content[key];
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return String(value);
+  }
+
+  return '';
+};
+
 const getMessageIdFromHeader = (notification: NotificationApiResponse): string => {
   return notification.fullNotification.header.messageId
     ?? notification.fullNotification.header.message_id
@@ -215,6 +231,44 @@ export const sendQualityInvestigationFault = async (
     },
     payload.relatedMessageId,
   );
+};
+
+export const ensureQualityInvestigationAcknowledgements = async (
+  localBpn: string,
+): Promise<QualityInvestigationNotification[]> => {
+  const fetchedNotifications = await fetchQualityInvestigationNotifications(localBpn);
+
+  const incomingRequests = fetchedNotifications.filter((notification) => {
+    return notification.context === QI_CONTEXT_REQUEST
+      && notification.receiverBpn === localBpn;
+  });
+
+  const requestsMissingAck = incomingRequests.filter((requestNotification) => {
+    return !fetchedNotifications.some((notification) => {
+      return notification.context === QI_CONTEXT_ACK
+        && notification.senderBpn === localBpn
+        && notification.receiverBpn === requestNotification.senderBpn
+        && notification.relatedMessageId === requestNotification.messageId;
+    });
+  });
+
+  if (requestsMissingAck.length === 0) {
+    return fetchedNotifications;
+  }
+
+  await Promise.all(
+    requestsMissingAck.map(async (requestNotification) => {
+      await sendQualityInvestigationAck({
+        localBpn,
+        remoteBpn: requestNotification.senderBpn,
+        relatedMessageId: requestNotification.messageId,
+        localPartGlobalId: getQualityInvestigationNotificationContentString(requestNotification, 'remotePartGlobalId'),
+        remotePartGlobalId: getQualityInvestigationNotificationContentString(requestNotification, 'localPartGlobalId'),
+      });
+    })
+  );
+
+  return fetchQualityInvestigationNotifications(localBpn);
 };
 
 export const getFinishedQualityInvestigationRequestIds = (): string[] => {

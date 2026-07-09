@@ -314,7 +314,7 @@ const TraceabilityQualityInvestigationDetailPage: React.FC = () => {
       <Button
         startIcon={<ArrowBack />}
         variant="outlined"
-        onClick={() => navigate('/traceability/quality-investigation')}
+        onClick={() => navigate('/traceability/quality-investigation/open')}
         sx={{
           mb: 2,
           borderColor: 'rgba(255, 122, 0, 0.5)',
@@ -325,7 +325,7 @@ const TraceabilityQualityInvestigationDetailPage: React.FC = () => {
           },
         }}
       >
-        Back To Quality Investigation
+        Back To Open Quality Investigation
       </Button>
 
       <Card

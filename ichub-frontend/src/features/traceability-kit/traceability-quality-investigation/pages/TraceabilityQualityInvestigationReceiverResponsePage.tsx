@@ -35,7 +35,8 @@ import {
 import { ArrowBack, Send } from '@mui/icons-material';
 import { getParticipantId } from '@/services/EnvironmentService';
 import {
-  fetchQualityInvestigationNotifications,
+  ensureQualityInvestigationAcknowledgements,
+  getQualityInvestigationNotificationContentString,
   QI_CONTEXT_FAULT,
   QI_CONTEXT_REQUEST,
   QualityInvestigationNotification,
@@ -44,22 +45,12 @@ import {
 
 const localBpn = getParticipantId();
 
-const getContentString = (notification: QualityInvestigationNotification, key: string): string => {
-  const value = notification.content[key];
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (typeof value === 'number') {
-    return String(value);
-  }
-  return '';
-};
-
 const TraceabilityQualityInvestigationReceiverResponsePage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
   const globalId = searchParams.get('globalId') ?? '';
+  const requestMessageId = searchParams.get('requestMessageId') ?? '';
 
   const [notifications, setNotifications] = useState<QualityInvestigationNotification[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +61,7 @@ const TraceabilityQualityInvestigationReceiverResponsePage: React.FC = () => {
   useEffect(() => {
     const loadNotifications = async () => {
       try {
-        const list = await fetchQualityInvestigationNotifications(localBpn);
+        const list = await ensureQualityInvestigationAcknowledgements(localBpn);
         setNotifications(list);
       } catch (loadError) {
         const message = loadError instanceof Error ? loadError.message : 'Failed to load quality investigation notifications.';
@@ -82,14 +73,34 @@ const TraceabilityQualityInvestigationReceiverResponsePage: React.FC = () => {
   }, []);
 
   const pendingRequest = useMemo(() => {
-    if (!globalId) {
+    if (!globalId && !requestMessageId) {
       return null;
+    }
+
+    if (requestMessageId) {
+      const matchedRequest = notifications.find((notification) => {
+        return notification.context === QI_CONTEXT_REQUEST
+          && notification.receiverBpn === localBpn
+          && notification.messageId === requestMessageId;
+      });
+
+      if (!matchedRequest) {
+        return null;
+      }
+
+      const hasFaultReply = notifications.some((notification) => {
+        return notification.context === QI_CONTEXT_FAULT
+          && notification.senderBpn === localBpn
+          && notification.relatedMessageId === matchedRequest.messageId;
+      });
+
+      return hasFaultReply ? null : matchedRequest;
     }
 
     const incomingRequests = notifications.filter((notification) => {
       return notification.context === QI_CONTEXT_REQUEST
         && notification.receiverBpn === localBpn
-        && getContentString(notification, 'localPartGlobalId') === globalId;
+        && getQualityInvestigationNotificationContentString(notification, 'remotePartGlobalId') === globalId;
     });
 
     const unresolvedRequest = incomingRequests.find((request) => {
@@ -123,14 +134,14 @@ const TraceabilityQualityInvestigationReceiverResponsePage: React.FC = () => {
         localBpn,
         remoteBpn: pendingRequest.senderBpn,
         relatedMessageId: pendingRequest.messageId,
-        localPartGlobalId: getContentString(pendingRequest, 'localPartGlobalId'),
-        remotePartGlobalId: getContentString(pendingRequest, 'remotePartGlobalId'),
+        localPartGlobalId: getQualityInvestigationNotificationContentString(pendingRequest, 'remotePartGlobalId'),
+        remotePartGlobalId: getQualityInvestigationNotificationContentString(pendingRequest, 'localPartGlobalId'),
         faultMessage: trimmedFaultMessage,
       });
 
       setSuccess('Fault notification sent successfully. The request status is now OK.');
       setTimeout(() => {
-        navigate('/traceability/quality-investigation');
+        navigate('/traceability/quality-investigation/received');
       }, 700);
     } catch (sendError) {
       const message = sendError instanceof Error ? sendError.message : 'Failed to send fault notification.';
@@ -145,7 +156,7 @@ const TraceabilityQualityInvestigationReceiverResponsePage: React.FC = () => {
       <Button
         startIcon={<ArrowBack />}
         variant="outlined"
-        onClick={() => navigate('/traceability/quality-investigation')}
+        onClick={() => navigate('/traceability/quality-investigation/received')}
         sx={{
           mb: 2,
           borderColor: 'rgba(255, 122, 0, 0.5)',
@@ -156,7 +167,7 @@ const TraceabilityQualityInvestigationReceiverResponsePage: React.FC = () => {
           },
         }}
       >
-        Back To Quality Investigation
+        Back To Received QI Requests
       </Button>
 
       <Card
@@ -203,7 +214,10 @@ const TraceabilityQualityInvestigationReceiverResponsePage: React.FC = () => {
                   <strong>Request Message ID:</strong> {pendingRequest.messageId}
                 </Typography>
                 <Typography variant="body2" sx={{ color: '#fff', fontFamily: 'monospace' }}>
-                  <strong>Remote Part globalAssetId:</strong> {getContentString(pendingRequest, 'remotePartGlobalId') || 'n/a'}
+                  <strong>Local Part globalAssetId:</strong> {getQualityInvestigationNotificationContentString(pendingRequest, 'remotePartGlobalId') || 'n/a'}
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#fff', fontFamily: 'monospace' }}>
+                  <strong>Requester Part globalAssetId:</strong> {getQualityInvestigationNotificationContentString(pendingRequest, 'localPartGlobalId') || 'n/a'}
                 </Typography>
               </Box>
 

@@ -23,7 +23,9 @@
 import { ManageSearch } from '@mui/icons-material';
 import { FeatureConfig } from '@/types/routing';
 import TraceabilityQualityInvestigationPage from './pages/TraceabilityQualityInvestigationPage';
+import TraceabilityQualityInvestigationSenderPage from './pages/TraceabilityQualityInvestigationSenderPage';
 import TraceabilityQualityInvestigationDetailPage from './pages/TraceabilityQualityInvestigationDetailPage';
+import TraceabilityQualityInvestigationReceiverInboxPage from './pages/TraceabilityQualityInvestigationReceiverInboxPage';
 import TraceabilityQualityInvestigationReceiverResponsePage from './pages/TraceabilityQualityInvestigationReceiverResponsePage';
 import TraceabilityQualityInvestigationFaultDetailPage from './pages/TraceabilityQualityInvestigationFaultDetailPage';
 
@@ -36,6 +38,14 @@ export const traceabilityQualityInvestigationFeature: FeatureConfig = {
     {
       path: '/traceability/quality-investigation',
       element: <TraceabilityQualityInvestigationPage />
+    },
+    {
+      path: '/traceability/quality-investigation/open',
+      element: <TraceabilityQualityInvestigationSenderPage />
+    },
+    {
+      path: '/traceability/quality-investigation/received',
+      element: <TraceabilityQualityInvestigationReceiverInboxPage />
     },
     {
       path: '/traceability/quality-investigation/detail',
